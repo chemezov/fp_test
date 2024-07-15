@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  php:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: php-container
+    volumes:
+      - .:/usr/src/myapp
+    depends_on:
+      db:
+        condition: service_healthy  # Указываем, что зависимость от db должна быть здоровой
+    command: ["php", "/usr/src/myapp/test_docker.php"]  # Команда для запуска PHP скрипта
+
+  db:
+    image: mysql:8.0
+    container_name: mysql-container
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: database
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]  # Healthcheck для MySQL
+      interval: 5s
+      retries: 5
+    volumes:
+      - db_data:/var/lib/mysql
+
+volumes:
+  db_data:
