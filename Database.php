@@ -2,7 +2,7 @@
 
 namespace FpDbTest;
 
-use Exception;
+use FpDbTest\parsers\QueryParser;
 use mysqli;
 
 class Database implements DatabaseInterface
@@ -16,11 +16,11 @@ class Database implements DatabaseInterface
 
     public function buildQuery(string $query, array $args = []): string
     {
-        throw new Exception();
+        return (new QueryParser($query, $args))->render();
     }
 
     public function skip()
     {
-        throw new Exception();
+        return QueryParser::SKIP;
     }
 }
