@@ -2,9 +2,11 @@
 
 namespace FpDbTest\parsers;
 
+use mysqli;
+
 interface QueryParserInterface
 {
-    public function __construct(string $query, array $args = []);
+    public function __construct(mysqli $mysqli);
 
-    public function render(): string;
+    public function render(string $query, array $args = []): string;
 }

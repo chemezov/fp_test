@@ -4,31 +4,37 @@ namespace FpDbTest\parsers;
 
 use FpDbTest\helpers\ArrayHelper;
 use InvalidArgumentException;
+use mysqli;
 
 class QueryParser implements QueryParserInterface
 {
-    public const string SKIP = '__SKIP__';
+    private mysqli $mysqli;
+    public readonly QueryParserSkipBlock $queryParserSkipBlock;
 
-    private string $query;
-    private array $args;
-
-    public function __construct(string $query, array $args = [])
+    public function __construct(mysqli $mysqli)
     {
-        $this->query = $query;
-        $this->args = $args;
+        $this->mysqli = $mysqli;
+
+        $this->queryParserSkipBlock = new QueryParserSkipBlock();
+    }
+
+    public function skip()
+    {
+        return $this->queryParserSkipBlock->skip();
     }
 
     /**
      * Returns rendered query string.
      *
+     * @param string $query
+     * @param array $args
      * @return string
      */
-    public function render(): string
+    public function render(string $query, array $args = []): string
     {
         $regex = '#\?(d|f|a|\#)?#';
 
-        $query = $this->query;
-        $args = $this->args;
+        $this->removeSkippedBlocks($query, $args);
 
         $result = preg_replace_callback($regex, function ($matches) use (&$args) {
             $source = $matches[0];
@@ -37,36 +43,25 @@ class QueryParser implements QueryParserInterface
             return $this->parseArg($target, $source);
         }, $query);
 
-        $result = $this->removeSkippedBlocks($result);
-        $result = $this->removeNonSkippedBlocks($result);
-
         return $result;
     }
 
-    protected function removeSkippedBlocks($input): string
+    protected function removeSkippedBlocks(&$query, &$args): void
     {
-        $pattern = '/\{[^{]*' . self::SKIP . '[^}]*\}/';
+        if (substr_count($query, '{') !== substr_count($query, '}')) {
+            throw new InvalidArgumentException('The number of opening and closing brackets does not match');
+        }
 
-        return preg_replace($pattern, '', $input);
-    }
-
-    protected function removeNonSkippedBlocks($input): string
-    {
-        $pattern = '/\{([^{}]*)\}/';
-
-        return preg_replace($pattern, '$1', $input);
+        $this->queryParserSkipBlock->removeSkippedBlocks($query, $args);
     }
 
     protected function parseArg($arg, $type): string
     {
-        if ($arg === self::SKIP) {
-            return $arg;
-        }
-
         return match ($type) {
             '?d' => $this->parseIntegerType($arg),
             '?f' => $this->parseFloatType($arg),
             '?#' => $this->parseIdentifierType($arg),
+            '?a' => $this->parseArrayType($arg),
             default => $this->parseCommonType($arg),
         };
     }
@@ -76,10 +71,10 @@ class QueryParser implements QueryParserInterface
         return implode(', ', array_map(fn($value) => '`' . $value . '`', (array)$arg));
     }
 
-    protected function parseCommonType($arg): string
+    protected function parseArrayType($arg): string
     {
         if (!is_array($arg)) {
-            return $this->parseScalarValue($arg);
+            throw new InvalidArgumentException('Argument must be an array');
         }
 
         $result = [];
@@ -87,6 +82,21 @@ class QueryParser implements QueryParserInterface
 
         foreach ($arg as $key => $value) {
             $result[] = ($isAssociative ? "`$key` = " : '') . $this->parseScalarValue($value);
+        }
+
+        return implode(', ', $result);
+    }
+
+    protected function parseCommonType($arg): string
+    {
+        if (!is_array($arg)) {
+            return $this->parseScalarValue($arg);
+        }
+
+        $result = [];
+
+        foreach ($arg as $value) {
+            $result[] = $this->parseScalarValue($value);
         }
 
         return implode(', ', $result);
@@ -129,11 +139,15 @@ class QueryParser implements QueryParserInterface
 
     protected function parseBooleanType($arg): string
     {
+        if (!is_bool($arg)) {
+            throw new InvalidArgumentException('Invalid boolean value.');
+        }
+
         return $arg ? '1' : '0';
     }
 
     protected function parseStringType($arg): string
     {
-        return "'" . addslashes($arg) . "'";
+        return "'" . $this->mysqli->real_escape_string($arg) . "'";
     }
 }

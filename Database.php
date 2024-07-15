@@ -8,19 +8,21 @@ use mysqli;
 class Database implements DatabaseInterface
 {
     private mysqli $mysqli;
+    private QueryParser $queryParser;
 
     public function __construct(mysqli $mysqli)
     {
         $this->mysqli = $mysqli;
+        $this->queryParser = new QueryParser($this->mysqli);
     }
 
     public function buildQuery(string $query, array $args = []): string
     {
-        return (new QueryParser($query, $args))->render();
+        return $this->queryParser->render($query, $args);
     }
 
     public function skip()
     {
-        return QueryParser::SKIP;
+        return $this->queryParser->skip();
     }
 }

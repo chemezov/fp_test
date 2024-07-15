@@ -2,6 +2,9 @@
 
 namespace FpDbTest\helpers;
 
+/**
+ * Класс и метод взят из yii2 фреймворка as-is.
+ */
 class ArrayHelper
 {
     public static function isAssociative($array, $allStrings = true)
