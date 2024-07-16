@@ -9,18 +9,15 @@ use mysqli;
 class QueryParser implements QueryParserInterface
 {
     private mysqli $mysqli;
-    public readonly QueryParserSkipBlock $queryParserSkipBlock;
 
     public function __construct(mysqli $mysqli)
     {
         $this->mysqli = $mysqli;
-
-        $this->queryParserSkipBlock = new QueryParserSkipBlock();
     }
 
     public function skip()
     {
-        return $this->queryParserSkipBlock->skip();
+        return SpecialMarker::SKIP;
     }
 
     /**
@@ -37,22 +34,101 @@ class QueryParser implements QueryParserInterface
         $this->removeSkippedBlocks($query, $args);
 
         $result = preg_replace_callback($regex, function ($matches) use (&$args) {
+            // Если кол-во аргументов меньше, чем кол-во спецификаторов
+            if (count($args) === 0) {
+                throw new InvalidArgumentException('Not enough arguments provided.');
+            }
+
             $source = $matches[0];
             $target = array_shift($args);
 
             return $this->parseArg($target, $source);
         }, $query);
 
+        if (count($args) > 0) {
+            throw new InvalidArgumentException('More than needed arguments provided.');
+        }
+
         return $result;
     }
 
-    protected function removeSkippedBlocks(&$query, &$args): void
+    function removeSkippedBlocks(string &$query, array &$args = []): void
     {
-        if (substr_count($query, '{') !== substr_count($query, '}')) {
-            throw new InvalidArgumentException('The number of opening and closing brackets does not match');
+        $args = array_values($args);
+
+        $positions = [];
+
+        // Найдём все позиции спецификаторов
+        if (preg_match_all('/\?/', $query, $matches, PREG_OFFSET_CAPTURE)) {
+            foreach ($matches[0] as $match) {
+                $positions[] = $match[1];
+            }
         }
 
-        $this->queryParserSkipBlock->removeSkippedBlocks($query, $args);
+        // Проходим строку с конца и пытаемся найти логические блоки
+        $i = strlen($query) - 1;
+
+        while ($i >= 0) {
+            $char = $query[$i];
+
+            // Если логический блок открывается раньше, чем была найдена закрывающаяся скобка.
+            if ($char === '{') {
+                throw new InvalidArgumentException('Invalid braces order.');
+            }
+
+            if ($char === '}') {
+                $bracesEnd = $i;
+                $bracesStart = strrpos($query, '{', $bracesEnd - strlen($query) - 1);
+
+                // Проверим, что текущий блок закрылся
+                if ($bracesStart === false) {
+                    throw new InvalidArgumentException('Unclosed braces in query');
+                }
+
+                // Проверим, что следующий блок закрывается не раньше, чем открылся текущий
+                $nextBracesEnd = strrpos($query, '}', $bracesEnd - strlen($query) - 1);
+
+                if ($nextBracesEnd > $bracesStart) {
+                    throw new InvalidArgumentException('Unclosed braces in query');
+                }
+
+                // Проверяем текущий блок на наличие спецификатора
+                $specifiersPositionsInBlock = array_filter($positions, fn($pos) => $pos > $bracesStart && $pos < $bracesEnd);
+
+                // Спецификатор должен быть ровно 1 в текущем блоке
+                if (count($specifiersPositionsInBlock) !== 1) {
+                    throw new InvalidArgumentException('Wrong specifiers count to logical braces');
+                }
+
+                // Получим порядковый номер нашего спецификатора внутри логического блока и его значение
+                $specifierIndex = array_keys($specifiersPositionsInBlock)[0];
+                $arg = $args[$specifierIndex];
+
+                // Если текущий блок нужно удалить
+                if ($arg === $this->skip()) {
+                    $query = substr_replace($query, '', $bracesStart, $bracesEnd - $bracesStart + 1);
+                    unset($args[$specifierIndex]);
+                } else {
+                    // Если же текущий блок удалять не надо, то просто удалим скобки и передвинем итератор
+                    $query = substr_replace($query, '', $bracesEnd, 1);
+                    $query = substr_replace($query, '', $bracesStart, 1);
+                }
+
+                // Следующую итерацию начинаем от текущей открывающейся скобки
+                $i = $bracesStart - 1;
+                continue;
+            }
+
+            $i--;
+        }
+
+        // В конце мы должны проверить не осталось ли SKIP аргументов вне логических скобок.
+        if (in_array($this->skip(), $args)) {
+            throw new InvalidArgumentException('Unprocessed skip argument found.');
+        }
+
+        // Сбросим ключи аргументов, т.к. мы удаляли их с помощью unset.
+        $args = array_values($args);
     }
 
     protected function parseArg($arg, $type): string
