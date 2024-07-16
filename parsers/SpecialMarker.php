@@ -2,7 +2,7 @@
 
 namespace FpDbTest\parsers;
 
-enum SkipEnum
+enum SpecialMarker
 {
     case SKIP;
 }

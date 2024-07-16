@@ -8,7 +8,7 @@ class QueryParserSkipBlock
 {
     public function skip()
     {
-        return SkipEnum::SKIP;
+        return SpecialMarker::SKIP;
     }
 
     public function removeSkippedBlocks(&$string, &$args, int $skipSpecifierCount = 0)
